@@ -1,24 +1,65 @@
-import Link from "next/link";
-import { adminLogout, resolveReportAction, updateContactJob } from "@/app/actions";
-import { getFounderDashboard } from "@/lib/db";
+import { adminLogout, resolveReportAction } from "@/app/actions";
+import { getFounderDashboard } from "@/lib/backend";
 import { requireAdmin } from "@/lib/session";
-import { formatPhone } from "@/lib/validation";
 
 export const metadata = { title: "Founder operations" };
 
+function percent(part: number, whole: number) {
+  return whole ? `${Math.round((part / whole) * 100)}%` : "0%";
+}
+
 export default async function AdminPage() {
   await requireAdmin();
-  const { totals, users, jobs, reports } = getFounderDashboard();
+  const { totals, retention, funnel, reports } = await getFounderDashboard();
+  const steps = [
+    ["Signed up", Number(funnel.signed_up)],
+    ["Onboarded", Number(funnel.onboarded)],
+    ["Sent a crush", Number(funnel.sent_a_crush)],
+    ["Opened a crush", Number(funnel.opened_a_crush)],
+    ["Made a guess", Number(funnel.made_a_guess)],
+  ] as const;
+
   return (
-    <main className="admin-shell"><header className="admin-header"><div><span className="admin-mark">14</span><div><p>FOURTEEN / INTERNAL</p><strong>Founder operations</strong></div></div><nav><Link href="/admin/export">Export CSV</Link><form action={adminLogout}><button>Lock console</button></form></nav></header>
-      <section className="admin-main"><div className="admin-warning"><strong>Restricted PII.</strong><span>This view intentionally overrides the original no-phone/no-crush-browsing brief for the manual launch. Do not screenshot, share, or export unless necessary.</span></div>
-      <div className="metric-grid"><article><span>Signups</span><strong>{totals.users}</strong><small>non-demo accounts</small></article><article><span>Onboarded</span><strong>{totals.onboarded}</strong><small>{totals.users ? Math.round((totals.onboarded / totals.users) * 100) : 0}% activation</small></article><article><span>Crushes</span><strong>{totals.crushes}</strong><small>all statuses</small></article><article className="metric-alert"><span>Needs contact</span><strong>{totals.queued}</strong><small>manual queue</small></article></div>
-      <section className="admin-section" id="queue"><div className="admin-section-title"><div><p className="eyebrow">Manual contact queue</p><h1>Who needs a text</h1></div><span>{jobs.filter((job) => job.status === "queued").length} waiting</span></div>
-        <div className="table-wrap"><table><thead><tr><th>Status</th><th>Recipient</th><th>Phone</th><th>Message to send</th><th>Sender audit</th><th>Action</th></tr></thead><tbody>{jobs.length ? jobs.map((job) => <tr key={String(job.id)}><td><span className={`status status--${job.status}`}>{String(job.status)}</span><small>{new Date(String(job.created_at)).toLocaleString()}</small></td><td><strong>#{String(job.recipient_number)} · {String(job.recipient_first_name)} {String(job.recipient_last_name)}</strong><small>{String(job.recipient_email)}</small></td><td><a href={`tel:${String(job.recipient_phone)}`}>{formatPhone(String(job.recipient_phone))}</a></td><td><div className="copy-cell"><p>{String(job.message)}</p><a href={String(job.deep_link)} target="_blank">{String(job.deep_link)}</a></div></td><td><strong>#{String(job.sender_number)} · {String(job.sender_first_name)}</strong><small>{String(job.sender_email)}</small></td><td><form action={updateContactJob}><input type="hidden" name="jobId" value={String(job.id)} /><button name="status" value={job.status === "contacted" ? "queued" : "contacted"}>{job.status === "contacted" ? "Reopen" : "Mark texted"}</button><button className="quiet-button" name="status" value="paused">Pause</button></form></td></tr>) : <tr><td colSpan={6} className="empty-table">No real-user contact jobs yet. Demo recipients never enter this queue.</td></tr>}</tbody></table></div>
-      </section>
-      <section className="admin-section"><div className="admin-section-title"><div><p className="eyebrow">Private user log</p><h2>Signed-up accounts</h2></div></div><div className="table-wrap"><table><thead><tr><th>Member</th><th>Name</th><th>Email</th><th>Phone</th><th>Consent</th><th>Joined</th></tr></thead><tbody>{users.length ? users.map((entry) => <tr key={String(entry.member_number)}><td><strong>#{String(entry.member_number)}</strong><small>{entry.onboarding_complete ? "Onboarded" : "Pending"}</small></td><td>{entry.first_name ? `${String(entry.first_name)} ${String(entry.last_name)}` : "—"}</td><td>{String(entry.email)}</td><td>{formatPhone(entry.phone_e164 ? String(entry.phone_e164) : null)}</td><td>{entry.phone_consent_at ? "Yes" : "No"}</td><td>{new Date(String(entry.created_at)).toLocaleDateString()}</td></tr>) : <tr><td colSpan={6} className="empty-table">No real users yet.</td></tr>}</tbody></table></div></section>
-      <section className="admin-section" id="reports"><div className="admin-section-title"><div><p className="eyebrow">Safety</p><h2>Private reports</h2></div><span>{reports.filter((report) => !report.resolved_at).length} open</span></div><div className="table-wrap"><table><thead><tr><th>Status</th><th>Reporter</th><th>Private report</th><th>Received</th><th>Action</th></tr></thead><tbody>{reports.length ? reports.map((report) => <tr key={String(report.id)}><td><span className={`status status--${report.resolved_at ? "contacted" : "queued"}`}>{report.resolved_at ? "resolved" : "open"}</span></td><td><strong>#{String(report.member_number)} · {String(report.first_name)} {String(report.last_name)}</strong><small>{String(report.email)}</small></td><td><div className="report-cell">{String(report.reason)}</div></td><td>{new Date(String(report.created_at)).toLocaleString()}</td><td>{!report.resolved_at && <form action={resolveReportAction}><input type="hidden" name="reportId" value={String(report.id)} /><button>Resolve</button></form>}</td></tr>) : <tr><td colSpan={5} className="empty-table">No safety reports.</td></tr>}</tbody></table></div></section>
-      <section className="admin-notes"><h2>Automation handoff</h2><p>Jobs are created through a provider boundary. A future AI-operated number can claim queued jobs, write a provider reference, and update delivery status without receiving sender identity. Keep the message payload anonymous.</p><code>CONTACT_PROVIDER=manual → ai_phone</code></section>
+    <main className="admin-shell">
+      <header className="admin-header">
+        <div><span className="admin-mark">14</span><div><p>FOURTEEN / INTERNAL</p><strong>Founder operations</strong></div></div>
+        <nav><form action={adminLogout}><button>Lock console</button></form></nav>
+      </header>
+      <section className="admin-main">
+        <div className="admin-warning"><strong>Aggregate-only operations.</strong><span>Individual accounts and crush relationships are intentionally unavailable here.</span></div>
+        <div className="metric-grid">
+          <article><span>Signups</span><strong>{totals.users}</strong><small>non-demo accounts</small></article>
+          <article><span>Onboarded</span><strong>{totals.onboarded}</strong><small>{percent(Number(totals.onboarded), Number(totals.users))} activation</small></article>
+          <article><span>Crushes</span><strong>{totals.crushes}</strong><small>{totals.active_crushes} active</small></article>
+          <article className="metric-alert"><span>Open reports</span><strong>{totals.open_reports}</strong><small>private safety queue</small></article>
+        </div>
+
+        <section className="admin-section">
+          <div className="admin-section-title"><div><p className="eyebrow">Product health</p><h1>Activation funnel</h1></div></div>
+          <div className="funnel-grid">
+            {steps.map(([label, value], index) => (
+              <article key={label}><span>{label}</span><strong>{value}</strong><small>{index ? percent(value, steps[index - 1][1]) : "baseline"}</small></article>
+            ))}
+          </div>
+        </section>
+
+        <section className="admin-section">
+          <div className="admin-section-title"><div><p className="eyebrow">Retention</p><h2>Return signals</h2></div></div>
+          <div className="metric-grid metric-grid--compact">
+            <article><span>Active in 7 days</span><strong>{retention.active_7d}</strong><small>{percent(Number(retention.active_7d), Number(totals.users))} of signups</small></article>
+            <article><span>Active in 30 days</span><strong>{retention.active_30d}</strong><small>{percent(Number(retention.active_30d), Number(totals.users))} of signups</small></article>
+            <article><span>Round finishers</span><strong>{retention.round_finishers}</strong><small>unique members</small></article>
+            <article><span>Resolved crushes</span><strong>{totals.resolved_crushes}</strong><small>mutual or revealed</small></article>
+          </div>
+        </section>
+
+        <section className="admin-section" id="reports">
+          <div className="admin-section-title"><div><p className="eyebrow">Safety</p><h2>Private reports</h2></div><span>{reports.filter((report) => !report.resolved_at).length} open</span></div>
+          <div className="table-wrap"><table><thead><tr><th>Status</th><th>Private report</th><th>Received</th><th>Action</th></tr></thead><tbody>
+            {reports.length ? reports.map((report) => <tr key={String(report.id)}><td><span className={`status status--${report.resolved_at ? "resolved" : "queued"}`}>{report.resolved_at ? "resolved" : "open"}</span></td><td><div className="report-cell">{String(report.reason)}</div></td><td>{new Date(String(report.created_at)).toLocaleString()}</td><td>{!report.resolved_at && <form action={resolveReportAction}><input type="hidden" name="reportId" value={String(report.id)} /><button>Resolve</button></form>}</td></tr>) : <tr><td colSpan={4} className="empty-table">No safety reports.</td></tr>}
+          </tbody></table></div>
+        </section>
+        <section className="admin-notes"><h2>Privacy boundary</h2><p>This console exposes aggregate product signals and the minimum report text needed for safety review. Account identities and crush joins are unavailable by design.</p></section>
       </section>
     </main>
   );

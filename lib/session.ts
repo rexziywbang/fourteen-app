@@ -4,7 +4,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ADMIN_COOKIE, SESSION_COOKIE } from "@/lib/constants";
-import { getSessionUser } from "@/lib/db";
+import { getSessionUser } from "@/lib/backend";
 
 export function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");

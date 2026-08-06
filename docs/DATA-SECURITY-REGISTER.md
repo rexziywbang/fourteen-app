@@ -1,12 +1,12 @@
 # Fourteen data and security register
 
-This is the working source for the Privacy Policy, Terms, launch checklist, and future AI-phone integration. It records the manual-launch override requested on August 5, 2026.
+This is the working source for the Privacy Policy, Terms, launch checklist, and future messaging decisions. The active August 6 model collects no phone numbers, sends no SMS, and gives founder operations aggregate data plus the minimum anonymous report queue. The earlier manual-contact plan remains below only as an archived decision record and must not be treated as an implementation instruction.
 
-## Manual-launch override
+## Archived manual-launch override (inactive)
 
 The original build brief prohibited phone fields, SMS, and an admin view of individual crush relationships. The founder request explicitly adds a manual notification workflow. The implementation therefore collects a phone number only with affirmative essential-text consent and creates a restricted operations job linking a crush to the intended recipient. No sender identity is included in the outbound message.
 
-## Stored data
+## Archived v1.0 stored-data proposal (inactive)
 
 | Data | Purpose | Exposure | Deletion |
 | --- | --- | --- | --- |
@@ -23,7 +23,11 @@ The original build brief prohibited phone fields, SMS, and an admin view of indi
 | Reports | Safety review | Reporter and authorized operations | Safety/legal retention policy |
 | First-party events | Product validation | Aggregate admin views | Account deletion or early de-identification |
 
-## Security controls
+## Archived v1.0 controls and launch checklist (inactive)
+
+The phone/contact items in the following sections describe a superseded build and are preserved only for decision history.
+
+### Security controls
 
 - Production uses Supabase Auth and Postgres with RLS enabled and base-table grants revoked.
 - Phone data is separated from public profile data; authenticated clients receive no grant to the private contact table or manual contact queue.
@@ -37,7 +41,7 @@ The original build brief prohibited phone fields, SMS, and an admin view of indi
 - Local `.data/` and all `.env*` secrets are gitignored.
 - No third-party trackers, contact upload, user-visible free text, or automated SMS exists in this build.
 
-## Before any public launch
+### Before any public launch
 
 1. Obtain legal review for privacy, terms, TCPA/text consent, Michigan law, and university trademark/affiliation wording.
 2. Replace local OTP and SQLite with hosted Supabase Auth/Postgres; configure custom SMTP.
@@ -47,3 +51,9 @@ The original build brief prohibited phone fields, SMS, and an admin view of indi
 6. Add an opt-out webhook/process that immediately suppresses future texts and records the request.
 7. Complete the required RLS, timing-oracle, race, deletion, and client-bundle tests from the build brief.
 8. Update the Privacy Policy before changing `CONTACT_PROVIDER` to an automated or AI-operated number. The automation provider must receive only recipient phone, neutral notification copy, and deep link—not sender identity.
+
+## Revision history: manual-contact reversal (August 6, 2026)
+
+The August 5 manual-contact override above is retained as a historical decision record and is no longer active. The founder reversed it in the Fourteen v1.1 revision. The application no longer collects or stores mobile numbers, records messaging consent, creates contact jobs, exports contact queues, or exposes individual account and crush relationships in founder operations.
+
+Current delivery is limited to in-app notifications, with web push and email fallback as the approved production path. The application server must not send SMS. Founder operations are aggregate-only except for the minimum report text and opaque report identifier required to resolve a safety report. Any future proposal to add contact data or an external messaging channel requires a new documented privacy decision, updated legal review, and an explicit schema migration.

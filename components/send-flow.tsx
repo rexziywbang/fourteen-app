@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useState } from "react";
 import { sendCrushAction } from "@/app/actions";
 import { CRUSH_MESSAGES } from "@/lib/constants";
-import type { DirectoryPerson } from "@/lib/db";
+import type { DirectoryPerson } from "@/lib/backend";
 import { SubmitButton } from "@/components/form-controls";
 
 export function SendFlow() {
@@ -67,7 +67,7 @@ export function SendFlow() {
           <blockquote>“{CRUSH_MESSAGES[messageId - 1]}”</blockquote>
           <div><span>Hint 1 of 14</span><span>14 days left</span></div>
         </div>
-        <div className="final-warning"><strong>This is your one for the week.</strong><span>No takebacks. Their phone number stays private, and your name stays hidden.</span></div>
+        <div className="final-warning"><strong>This is your one for the week.</strong><span>No takebacks. Your name stays hidden.</span></div>
         {state?.error && <p className="form-error" role="alert">{state.error}</p>}
         <SubmitButton pendingText="Lighting the fuse…">Send anonymously <span aria-hidden="true">♥</span></SubmitButton>
       </section>}

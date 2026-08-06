@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { guessCrushAction } from "@/app/actions";
-import type { DirectoryPerson } from "@/lib/db";
+import type { DirectoryPerson } from "@/lib/backend";
 import { SubmitButton } from "@/components/form-controls";
 
 export function GuessModule({ crushId, usedToday }: { crushId: string; usedToday: boolean }) {

@@ -12,6 +12,14 @@ export type HintProfile = {
 
 type WeightedHint = { text: string; weight: number };
 
+export function recipientHintDto(input: { dayIndex: number; hintText: string; unlockedAt: string | null }) {
+  return {
+    dayIndex: input.dayIndex,
+    hintText: input.unlockedAt ? input.hintText : null,
+    unlockedAt: input.unlockedAt,
+  };
+}
+
 export function buildHintLadder(sender: HintProfile, recipientYear: number) {
   const yearDifference = sender.classYear - recipientYear;
   const relativeYear =

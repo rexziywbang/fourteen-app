@@ -46,7 +46,6 @@ export const POLL_PROMPTS = [
   "Who makes 8am lectures survivable?",
 ] as const;
 
-export const LOCAL_OTP_CODE = process.env.DEV_OTP_CODE || "140014";
 export const SESSION_COOKIE = "fourteen_session";
 export const ADMIN_COOKIE = "fourteen_founder";
 

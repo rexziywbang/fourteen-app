@@ -6,7 +6,7 @@ export function ShareInvite({ url }: { url: string }) {
   const [status, setStatus] = useState("Share invite");
   async function share() {
     try {
-      if (navigator.share) await navigator.share({ title: "Join my circle on Fourteen", text: "You’re one of my people. Join my circle on Fourteen.", url });
+      if (navigator.share) await navigator.share({ title: "You’re invited to Fourteen at Michigan.", text: "Someone may already be waiting.", url });
       else {
         await navigator.clipboard.writeText(url);
         setStatus("Link copied");

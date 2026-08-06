@@ -11,27 +11,27 @@ export default async function LandingPage({ searchParams }: { searchParams: Prom
     <main className="landing">
       <header className="landing-nav"><Brand /><Link href="/safety">Safety, by design</Link></header>
       <div className="landing-grid">
-        <section className="hero-copy">
-          <div className="campus-pill"><span /> Now at Michigan</div>
-          <h1>Some things are<br /><em>worth wondering.</em></h1>
-          <p className="hero-lede">Tell one person a week. Stay anonymous. Give them fourteen days to figure it out.</p>
-          {deleted && <p className="success-note">Your account and its associated data were deleted.</p>}
-          {user?.onboardingComplete ? <Link className="button button--primary button--wide" href="/home">Open Fourteen →</Link> : <SignupForm />}
-        </section>
-
-        <section className="phone-stage" aria-label="Preview of a crush notification">
+        <section className="device-stage" aria-label="Preview of a crush notification">
           <div className="orbit orbit--one" /><div className="orbit orbit--two" />
-          <div className="phone-glow" />
-          <div className="phone-frame">
-            <div className="phone-status"><span>9:41</span><i /><b>● ᯤ</b></div>
-            <div className="phone-date"><small>WEDNESDAY, AUGUST 5</small><strong>9:41</strong></div>
+          <div className="device-glow" />
+          <div className="device-frame">
+            <div className="device-status"><span>9:41</span><i /><b>● ᯤ</b></div>
+            <div className="device-date"><small>WEDNESDAY, AUGUST 5</small><strong>9:41</strong></div>
             <div className="push-card">
               <div className="app-icon">♥</div>
               <div><strong>FOURTEEN <span>now</span></strong><p>Someone has a crush on you.</p><small>Hint 1 of 14 is waiting.</small></div>
             </div>
-            <p className="phone-whisper">Fourteen days. One honest chance.</p>
+            <p className="device-whisper">Fourteen days. One honest chance.</p>
           </div>
           <div className="floating-note">No name. No pressure.<br /><strong>Just a little possibility.</strong></div>
+        </section>
+
+        <section className="hero-copy">
+          <div className="campus-pill"><span /> Now at Michigan</div>
+          <h1>Some things are <em>worth wondering.</em></h1>
+          <p className="hero-lede">Tell one person a week. Stay anonymous. Give them fourteen days to figure it out.</p>
+          {deleted && <p className="success-note">Your account and its associated data were deleted.</p>}
+          {user?.onboardingComplete ? <Link className="button button--primary button--wide" href="/home">Open Fourteen →</Link> : <SignupForm />}
         </section>
       </div>
 

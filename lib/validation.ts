@@ -1,12 +1,5 @@
 import { z } from "zod";
 
-const normalizePhone = (value: string) => {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return value;
-};
-
 export const emailSchema = z
   .string()
   .trim()
@@ -14,14 +7,6 @@ export const emailSchema = z
   .transform((value) => value.toLowerCase())
   .refine((value) => value.endsWith("@umich.edu"), {
     message: "Fourteen is currently only open to @umich.edu emails.",
-  });
-
-export const phoneSchema = z
-  .string()
-  .trim()
-  .transform(normalizePhone)
-  .refine((value) => /^\+1\d{10}$/.test(value), {
-    message: "Enter a 10-digit US phone number.",
   });
 
 export const startSignupSchema = z.object({ email: emailSchema });
@@ -38,10 +23,6 @@ export const onboardingSchema = z.object({
   firstName: z.string().trim().min(1).max(30),
   lastName: z.string().trim().min(1).max(30),
   classYear: z.coerce.number().int().min(2027).max(2031),
-  phone: phoneSchema,
-  contactConsent: z.literal("on", {
-    errorMap: () => ({ message: "Consent is required for the manual launch." }),
-  }),
   circleIds: z.array(z.string().uuid()).min(1, "Pick at least one person."),
 });
 
@@ -66,9 +47,4 @@ export function isAdultDob(year: number, month: number, day: number, now = new D
   let age = currentYear - year;
   if (currentMonth < month || (currentMonth === month && currentDay < day)) age -= 1;
   return age >= 18;
-}
-
-export function formatPhone(value: string | null) {
-  if (!value || !/^\+1\d{10}$/.test(value)) return "Not provided";
-  return `(${value.slice(2, 5)}) ${value.slice(5, 8)}-${value.slice(8)}`;
 }

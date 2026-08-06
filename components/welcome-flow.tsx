@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { finishOnboarding } from "@/app/actions";
-import type { DirectoryPerson } from "@/lib/db";
+import type { DirectoryPerson } from "@/lib/backend";
 import { SubmitButton } from "@/components/form-controls";
 
 const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -38,8 +38,6 @@ export function WelcomeFlow({ people }: { people: DirectoryPerson[] }) {
           <label><span className="field-label">Last name</span><input name="lastName" autoComplete="family-name" required maxLength={30} /></label>
         </div>
         <label><span className="field-label">Class year</span><select name="classYear" required defaultValue=""><option value="" disabled>Select year</option>{[2027, 2028, 2029, 2030, 2031].map((year) => <option key={year}>{year}</option>)}</select></label>
-        <label><span className="field-label">Mobile number</span><input name="phone" type="tel" autoComplete="tel" inputMode="tel" placeholder="(734) 555-0140" required /><span className="field-help">Private. Used only for essential launch messages; never shown to students.</span></label>
-        <label className="consent-row"><input name="contactConsent" type="checkbox" required /><span>I agree to receive essential account texts during the manual launch. Message and data rates may apply. I can opt out at any time.</span></label>
         <div className="button-row"><button type="button" className="button button--ghost" onClick={() => setStep(0)}>Back</button><button type="button" className="button button--primary" onClick={() => setStep(2)}>Continue</button></div>
       </section>
 

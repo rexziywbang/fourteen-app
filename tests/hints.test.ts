@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHintLadder } from "@/lib/hints";
+import { buildHintLadder, recipientHintDto } from "@/lib/hints";
 
 const sender = {
   firstName: "Maya",
@@ -31,5 +31,10 @@ describe("hint ladder", () => {
   it("renders relative class year truthfully", () => {
     expect(buildHintLadder(sender, 2027)).toContain("They're a year below you.");
     expect(buildHintLadder(sender, 2029)).toContain("They're a year above you.");
+  });
+
+  it("strips locked hint text from the recipient DTO", () => {
+    expect(recipientHintDto({ dayIndex: 8, hintText: "server-only truth", unlockedAt: null }))
+      .toEqual({ dayIndex: 8, hintText: null, unlockedAt: null });
   });
 });

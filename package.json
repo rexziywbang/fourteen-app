@@ -8,24 +8,30 @@
     "start": "next start",
     "lint": "eslint .",
     "test": "vitest run",
-    "check": "pnpm lint && pnpm test && pnpm build"
+    "test:postgres": "vitest run tests/postgres-security.test.ts",
+    "test:e2e": "playwright test",
+    "check:client-secrets": "node scripts/check-client-secrets.mjs",
+    "check": "pnpm lint && pnpm test && pnpm build && pnpm check:client-secrets"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.0",
     "next": "15.5.9",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "typescript": "^5",
+    "@axe-core/playwright": "^4.12.1",
+    "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^24",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@tailwindcss/postcss": "^4",
-    "tailwindcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "15.5.9",
-    "@eslint/eslintrc": "^3",
+    "tailwindcss": "^4",
+    "typescript": "^5",
     "vitest": "^3.2.4"
   }
 }

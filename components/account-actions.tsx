@@ -11,7 +11,7 @@ export function DeleteAccountForm() {
   return (
     <form action={action} className="danger-box">
       <strong>This permanently deletes your account.</strong>
-      <p>Type DELETE to confirm. Your profile, crushes, phone number, and activity are removed.</p>
+      <p>Type DELETE to confirm. Your profile, crushes, and activity are removed.</p>
       <input name="confirmation" placeholder="DELETE" autoComplete="off" />
       {state?.error && <p className="form-error">{state.error}</p>}
       <div className="button-row"><button type="button" className="button button--ghost" onClick={() => setOpen(false)}>Cancel</button><SubmitButton className="button button--danger">Delete</SubmitButton></div>

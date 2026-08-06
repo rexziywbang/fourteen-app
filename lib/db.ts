@@ -4,9 +4,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { APP_TIMEZONE, CRUSH_MESSAGES, POLL_PROMPTS, formatDetroitDate } from "@/lib/constants";
-import { buildHintLadder } from "@/lib/hints";
-import { getContactProvider } from "@/lib/contact-provider";
+import { CRUSH_MESSAGES, POLL_PROMPTS, formatDetroitDate } from "@/lib/constants";
+import { buildHintLadder, recipientHintDto } from "@/lib/hints";
+import { buildPollOptionIds, seededOrder } from "@/lib/polls";
+import { detroitDateKey, startOfIsoWeekDetroit } from "@/lib/time";
+import { isAdultDob } from "@/lib/validation";
 
 export type SafeUser = {
   id: string;
@@ -15,7 +17,6 @@ export type SafeUser = {
   firstName: string | null;
   lastName: string | null;
   classYear: number | null;
-  phone: string | null;
   isDemo: boolean;
   onboardingComplete: boolean;
   createdAt: string;
@@ -28,6 +29,21 @@ export type DirectoryPerson = {
   classYear: number;
   isDemo: boolean;
 };
+
+export type PollRoundState =
+  | { locked: true; circleCount: number }
+  | { locked: false; complete: true; answered: number; total: number }
+  | {
+      locked: false;
+      complete: false;
+      answered: number;
+      total: number;
+      card: {
+        id: string;
+        prompt: string;
+        options: Array<{ id: string; firstName: string; lastName: string; classYear: number }>;
+      };
+    };
 
 type DbGlobal = typeof globalThis & { __fourteenDb?: DatabaseSync };
 
@@ -48,8 +64,6 @@ function initialize(database: DatabaseSync) {
       first_name TEXT,
       last_name TEXT,
       class_year INTEGER,
-      phone_e164 TEXT,
-      phone_consent_at TEXT,
       is_over_18 INTEGER NOT NULL DEFAULT 0,
       onboarding_complete INTEGER NOT NULL DEFAULT 0,
       is_demo INTEGER NOT NULL DEFAULT 0,
@@ -62,7 +76,8 @@ function initialize(database: DatabaseSync) {
       email TEXT PRIMARY KEY,
       code_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
-      attempts INTEGER NOT NULL DEFAULT 0
+      attempts INTEGER NOT NULL DEFAULT 0,
+      sent_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -173,6 +188,16 @@ function initialize(database: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_success_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS reports (
       id TEXT PRIMARY KEY,
       reporter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -180,21 +205,6 @@ function initialize(database: DatabaseSync) {
       reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 500),
       created_at TEXT NOT NULL,
       resolved_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS contact_jobs (
-      id TEXT PRIMARY KEY,
-      crush_id TEXT UNIQUE NOT NULL REFERENCES crushes(id) ON DELETE CASCADE,
-      recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      recipient_phone TEXT NOT NULL,
-      provider TEXT NOT NULL DEFAULT 'manual' CHECK (provider IN ('manual','ai_phone')),
-      status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','contacted','paused','failed')),
-      message TEXT NOT NULL,
-      deep_link TEXT NOT NULL,
-      provider_reference TEXT,
-      created_at TEXT NOT NULL,
-      contacted_at TEXT,
-      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -223,6 +233,11 @@ function initialize(database: DatabaseSync) {
     );
   `);
 
+  const otpColumns = database.prepare("PRAGMA table_info(otp_codes)").all() as { name: string }[];
+  if (!otpColumns.some((column) => column.name === "sent_at")) {
+    database.exec("ALTER TABLE otp_codes ADD COLUMN sent_at TEXT");
+  }
+
   const shouldSeed = process.env.SEED_DEMO_USERS !== "false" && process.env.NODE_ENV !== "production";
   seedContent(database);
   if (shouldSeed) seedDemoUsers(database);
@@ -236,19 +251,19 @@ function seedContent(database: DatabaseSync) {
 function seedDemoUsers(database: DatabaseSync) {
   const now = new Date().toISOString();
   const demos = [
-    ["bfe2bf22-7349-42ae-b450-854269604724", 9001, "demo.maya@umich.edu", "Maya", "Patel", 2028, "+17345550111"],
-    ["68787870-3878-43da-8c5e-af61f31e1db7", 9002, "demo.noah@umich.edu", "Noah", "Kim", 2027, "+17345550122"],
-    ["b9eeae31-3e09-4761-a8dd-9752ca647bd2", 9003, "demo.lena@umich.edu", "Lena", "Brooks", 2029, "+17345550133"],
-    ["49e9a6f2-c970-469b-b592-f37a62a7aa04", 9004, "demo.eli@umich.edu", "Eli", "Rivera", 2028, "+17345550144"],
+    ["bfe2bf22-7349-42ae-b450-854269604724", 9001, "demo.maya@umich.edu", "Maya", "Patel", 2028],
+    ["68787870-3878-43da-8c5e-af61f31e1db7", 9002, "demo.noah@umich.edu", "Noah", "Kim", 2027],
+    ["b9eeae31-3e09-4761-a8dd-9752ca647bd2", 9003, "demo.lena@umich.edu", "Lena", "Brooks", 2029],
+    ["49e9a6f2-c970-469b-b592-f37a62a7aa04", 9004, "demo.eli@umich.edu", "Eli", "Rivera", 2028],
   ] as const;
 
   const statement = database.prepare(`
     INSERT OR IGNORE INTO users
-      (id, member_number, email, first_name, last_name, class_year, phone_e164,
-       phone_consent_at, is_over_18, onboarding_complete, is_demo, joined_month, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, 1, 'August', ?)
+      (id, member_number, email, first_name, last_name, class_year,
+       is_over_18, onboarding_complete, is_demo, joined_month, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1, 'August', ?)
   `);
-  for (const demo of demos) statement.run(...demo, now, now);
+  for (const demo of demos) statement.run(...demo, now);
 }
 
 export function getDb() {
@@ -270,7 +285,6 @@ function userFromRow(row: Record<string, unknown>): SafeUser {
     firstName: row.first_name ? String(row.first_name) : null,
     lastName: row.last_name ? String(row.last_name) : null,
     classYear: row.class_year ? Number(row.class_year) : null,
-    phone: row.phone_e164 ? String(row.phone_e164) : null,
     isDemo: Boolean(row.is_demo),
     onboardingComplete: Boolean(row.onboarding_complete),
     createdAt: String(row.created_at),
@@ -304,17 +318,24 @@ export function getUserByEmail(email: string) {
 }
 
 export function saveOtp(email: string, codeHash: string) {
-  const expires = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+  const now = new Date();
+  const expires = new Date(now.getTime() + 10 * 60 * 1000).toISOString();
   getDb()
-    .prepare(`INSERT INTO otp_codes (email, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)
-      ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0`)
-    .run(email, codeHash, expires);
+    .prepare(`INSERT INTO otp_codes (email, code_hash, expires_at, attempts, sent_at) VALUES (?, ?, ?, 0, ?)
+      ON CONFLICT(email) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at, attempts = 0, sent_at = excluded.sent_at`)
+    .run(email, codeHash, expires, now.toISOString());
 }
 
 export function getOtp(email: string) {
   return getDb().prepare("SELECT * FROM otp_codes WHERE email = ?").get(email) as
-    | { email: string; code_hash: string; expires_at: string; attempts: number }
+    | { email: string; code_hash: string; expires_at: string; attempts: number; sent_at: string | null }
     | undefined;
+}
+
+export function otpCooldownSeconds(email: string) {
+  const otp = getOtp(email);
+  if (!otp?.sent_at) return 0;
+  return Math.max(0, Math.ceil((new Date(otp.sent_at).getTime() + 30_000 - Date.now()) / 1000));
 }
 
 export function incrementOtpAttempts(email: string) {
@@ -346,20 +367,23 @@ export function deleteSession(tokenHash: string) {
 
 export function completeOnboarding(input: {
   userId: string;
+  birthYear: number;
+  birthMonth: number;
+  birthDay: number;
   firstName: string;
   lastName: string;
   classYear: number;
-  phone: string;
   circleIds: string[];
 }) {
+  if (!isAdultDob(input.birthYear, input.birthMonth, input.birthDay)) throw new Error("You must be 18 or older.");
   const database = getDb();
   const now = new Date().toISOString();
   database.exec("BEGIN IMMEDIATE");
   try {
     database
-      .prepare(`UPDATE users SET first_name = ?, last_name = ?, class_year = ?, phone_e164 = ?,
-        phone_consent_at = ?, is_over_18 = 1, onboarding_complete = 1, last_active_at = ? WHERE id = ?`)
-      .run(input.firstName, input.lastName, input.classYear, input.phone, now, now, input.userId);
+      .prepare(`UPDATE users SET first_name = ?, last_name = ?, class_year = ?,
+        is_over_18 = 1, onboarding_complete = 1, last_active_at = ? WHERE id = ?`)
+      .run(input.firstName, input.lastName, input.classYear, now, input.userId);
     const insertEdge = database.prepare(
       "INSERT OR IGNORE INTO circle_edges (owner_id, member_id, created_at) VALUES (?, ?, ?)",
     );
@@ -420,27 +444,12 @@ export function suggestedPeople(userId: string) {
 export function getCircle(userId: string) {
   return getDb()
     .prepare(`SELECT u.id, u.first_name, u.last_name, u.class_year FROM circle_edges e
-      JOIN users u ON u.id = e.member_id WHERE e.owner_id = ? ORDER BY u.first_name, u.last_name`)
+      JOIN users u ON u.id = e.member_id WHERE e.owner_id = ?
+      AND NOT EXISTS (SELECT 1 FROM blocks b WHERE
+        (b.blocker_id = e.owner_id AND b.blocked_id = e.member_id)
+        OR (b.blocker_id = e.member_id AND b.blocked_id = e.owner_id))
+      ORDER BY u.first_name, u.last_name`)
     .all(userId) as Record<string, unknown>[];
-}
-
-function startOfIsoWeekDetroit() {
-  const local = new Date(new Date().toLocaleString("en-US", { timeZone: APP_TIMEZONE }));
-  const day = local.getDay() || 7;
-  local.setDate(local.getDate() - day + 1);
-  local.setHours(0, 0, 0, 0);
-  return local.toISOString();
-}
-
-function detroitDateKey(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: APP_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function enqueueNotification(database: DatabaseSync, userId: string, kind: string, payload: Record<string, unknown>, deliverAfter = new Date()) {
@@ -474,8 +483,8 @@ export function createCrush(senderId: string, recipientId: string, messageId: nu
   if (senderId === recipientId) throw new Error("You cannot send a crush to yourself.");
   const weekly = database
     .prepare("SELECT COUNT(*) AS count FROM crushes WHERE sender_id = ? AND created_at >= ?")
-    .get(senderId, startOfIsoWeekDetroit()) as { count: number };
-  if (Number(weekly.count) > 0) throw new Error("Your one crush for this week is already in motion.");
+    .get(senderId, startOfIsoWeekDetroit().toISOString()) as { count: number };
+  if (Number(weekly.count) > 0) throw new Error("Your one for the week is out there.");
 
   const now = new Date();
   const expires = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -524,21 +533,6 @@ export function createCrush(senderId: string, recipientId: string, messageId: nu
       database.prepare("UPDATE crushes SET resolved_at = ? WHERE id = ?").run(now.toISOString(), id);
       enqueueNotification(database, senderId, "mutual_reveal", { crush_id: id });
       enqueueNotification(database, recipientId, "mutual_reveal", { crush_id: reciprocal.id });
-    } else if (status === "active" && recipient.phone && !recipient.isDemo) {
-      const origin = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const provider = getContactProvider();
-      const job = provider.createJob({
-        crushId: id,
-        recipientId,
-        recipientPhone: recipient.phone,
-        message: "Someone has a crush on you. Hint 1 of 14 is waiting.",
-        deepLink: `${origin}/crush/${id}`,
-      });
-      database
-        .prepare(`INSERT INTO contact_jobs
-          (id, crush_id, recipient_id, recipient_phone, provider, status, message, deep_link, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(randomUUID(), id, recipientId, recipient.phone, job.provider, job.status, job.message, job.deepLink, now.toISOString(), now.toISOString());
     }
     if (status === "active") enqueueNotification(database, recipientId, "crush_received", { crush_id: id });
     database.exec("COMMIT");
@@ -559,13 +553,12 @@ export function getHomeData(userId: string) {
       FROM crushes c WHERE c.recipient_id = ? AND c.status <> 'suppressed' ORDER BY c.created_at DESC`)
     .all(userId) as Record<string, unknown>[];
   const sent = database
-    .prepare(`SELECT c.id, c.message_id, c.status, c.created_at, c.expires_at,
+    .prepare(`SELECT c.id, c.message_id, CASE WHEN c.status = 'suppressed' THEN 'active' ELSE c.status END AS status, c.created_at, c.expires_at,
       u.first_name AS recipient_first_name, u.last_name AS recipient_last_name,
       (SELECT COUNT(*) FROM crush_hints h WHERE h.crush_id = c.id AND h.unlocked_at IS NOT NULL) AS hints_unlocked
       FROM crushes c JOIN users u ON u.id = c.recipient_id WHERE c.sender_id = ? ORDER BY c.created_at DESC`)
     .all(userId) as Record<string, unknown>[];
-  const circleCount = database.prepare("SELECT COUNT(*) AS count FROM circle_edges WHERE owner_id = ?").get(userId) as { count: number };
-  return { received, sent, circleCount: Number(circleCount.count) };
+  return { received, sent, circleCount: getCircle(userId).length };
 }
 
 export function getCrushForRecipient(userId: string, crushId: string) {
@@ -585,9 +578,8 @@ export function getCrushForRecipient(userId: string, crushId: string) {
     createdAt: String(row.created_at),
     expiresAt: String(row.expires_at),
     guessesToday,
-    hints: hintRows.map((hint) => ({
-      dayIndex: Number(hint.day_index),
-      hintText: String(hint.hint_text),
+    hints: hintRows.map((hint) => recipientHintDto({
+      dayIndex: Number(hint.day_index), hintText: String(hint.hint_text),
       unlockedAt: hint.unlocked_at ? String(hint.unlocked_at) : null,
     })),
   };
@@ -607,7 +599,7 @@ export function getCrushForSender(userId: string, crushId: string) {
   return {
     id: String(row.id),
     messageId: Number(row.message_id),
-    status: String(row.status),
+    status: row.status === "suppressed" ? "active" : String(row.status),
     createdAt: String(row.created_at),
     expiresAt: String(row.expires_at),
     correctGuessAt: row.correct_guess_at ? String(row.correct_guess_at) : null,
@@ -624,17 +616,20 @@ export function getCrushForSender(userId: string, crushId: string) {
 export function openCrush(userId: string, crushId: string) {
   const database = getDb();
   const crush = database.prepare("SELECT sender_id, status FROM crushes WHERE id = ? AND recipient_id = ?").get(crushId, userId) as { sender_id: string; status: string } | undefined;
-  if (!crush || crush.status !== "active") return;
+  if (!crush || crush.status !== "active") return null;
   const now = new Date();
   const today = detroitDateKey(now);
   const inserted = database.prepare("INSERT OR IGNORE INTO crush_opens (crush_id, open_date, created_at) VALUES (?, ?, ?)").run(crushId, today, now.toISOString());
-  if (!inserted.changes) return;
+  if (!inserted.changes) return null;
   const latest = database.prepare("SELECT day_index, unlocked_at FROM crush_hints WHERE crush_id = ? AND unlocked_at IS NOT NULL ORDER BY day_index DESC LIMIT 1").get(crushId) as { day_index: number; unlocked_at: string } | undefined;
-  if (!latest || detroitDateKey(new Date(latest.unlocked_at)) === today || latest.day_index >= 14) return;
+  if (!latest) return null;
+  if (detroitDateKey(new Date(latest.unlocked_at)) === today) return latest.day_index;
+  if (latest.day_index >= 14) return null;
   const next = latest.day_index + 1;
   database.prepare("UPDATE crush_hints SET unlocked_at = ? WHERE crush_id = ? AND day_index = ?").run(now.toISOString(), crushId, next);
   enqueueNotification(database, crush.sender_id, "fuse_progress", { crush_id: crushId, hint_number: next });
   logEvent(userId, "hint_unlocked", { crush_id: crushId, hint_number: next });
+  return next;
 }
 
 export function submitGuess(userId: string, crushId: string, guessedId: string) {
@@ -693,17 +688,23 @@ function createRound(database: DatabaseSync, userId: string, roundDate: string, 
   const roundId = randomUUID();
   const now = new Date().toISOString();
   database.prepare("INSERT INTO poll_rounds (id, user_id, round_date, created_at) VALUES (?, ?, ?, ?)").run(roundId, userId, roundDate, now);
-  const prompts = database.prepare("SELECT id FROM poll_prompts WHERE active = 1 ORDER BY id").all() as { id: number }[];
-  const dayOffset = Number(roundDate.replaceAll("-", "")) % prompts.length;
+  const prompts = seededOrder(database.prepare("SELECT id FROM poll_prompts WHERE active = 1").all() as { id: number }[], `${userId}:${roundDate}:prompts`, (prompt) => String(prompt.id));
+  const candidates = people.map((person) => {
+    const row = database.prepare(`SELECT MAX(c.answered_at) AS last_featured_at FROM poll_cards c
+      WHERE c.answered_at IS NOT NULL AND EXISTS (
+        SELECT 1 FROM json_each(c.option_ids) WHERE json_each.value = ?
+      )`).get(String(person.id)) as { last_featured_at: string | null };
+    return { id: String(person.id), lastFeaturedAt: row.last_featured_at };
+  });
+  const optionCards = buildPollOptionIds(candidates, `${userId}:${roundDate}`);
   const insertCard = database.prepare("INSERT INTO poll_cards (id, round_id, position, prompt_id, option_ids) VALUES (?, ?, ?, ?, ?)");
   for (let position = 0; position < 6; position += 1) {
-    const options = Array.from({ length: 4 }, (_, index) => String(people[(position * 2 + index) % people.length].id));
-    insertCard.run(randomUUID(), roundId, position, prompts[(dayOffset + position) % prompts.length].id, JSON.stringify(options));
+    insertCard.run(randomUUID(), roundId, position, prompts[position % prompts.length].id, JSON.stringify(optionCards[position]));
   }
   return roundId;
 }
 
-export function getTodayRound(userId: string) {
+export function getTodayRound(userId: string): PollRoundState {
   const database = getDb();
   const people = getCircle(userId);
   if (people.length < 4) return { locked: true as const, circleCount: people.length };
@@ -751,7 +752,60 @@ export function answerPollCard(userId: string, cardId: string, pickedId: string 
 
 export function getCompliments(userId: string) {
   return getDb().prepare(`SELECT p.id, pp.text AS prompt_text, p.created_at FROM picks p
-    JOIN poll_prompts pp ON pp.id = p.prompt_id WHERE p.picked_id = ? ORDER BY p.created_at DESC LIMIT 20`).all(userId) as Record<string, unknown>[];
+    JOIN poll_prompts pp ON pp.id = p.prompt_id WHERE p.picked_id = ?
+    AND NOT EXISTS (SELECT 1 FROM blocks b WHERE
+      (b.blocker_id = p.picker_id AND b.blocked_id = p.picked_id)
+      OR (b.blocker_id = p.picked_id AND b.blocked_id = p.picker_id))
+    ORDER BY p.created_at DESC LIMIT 20`).all(userId) as Record<string, unknown>[];
+}
+
+function blockPair(database: DatabaseSync, actorId: string, targetId: string) {
+  if (actorId === targetId) throw new Error("You cannot block yourself.");
+  const now = new Date().toISOString();
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.prepare("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id, created_at) VALUES (?, ?, ?)")
+      .run(actorId, targetId, now);
+    const pairCrushes = database.prepare(`SELECT id FROM crushes WHERE
+      (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)`)
+      .all(actorId, targetId, targetId, actorId) as { id: string }[];
+    database.prepare(`UPDATE crushes SET status = 'suppressed', resolved_at = ?
+      WHERE status IN ('active','mutual') AND
+      ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))`)
+      .run(now, actorId, targetId, targetId, actorId);
+    const deleteNotification = database.prepare("DELETE FROM notifications WHERE json_extract(payload, '$.crush_id') = ?");
+    for (const crush of pairCrushes) deleteNotification.run(crush.id);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function blockFromCrush(userId: string, crushId: string) {
+  const database = getDb();
+  const row = database.prepare("SELECT sender_id FROM crushes WHERE id = ? AND recipient_id = ?")
+    .get(crushId, userId) as { sender_id: string } | undefined;
+  if (!row) return;
+  blockPair(database, userId, row.sender_id);
+}
+
+export function blockFromPick(userId: string, pickId: string) {
+  const database = getDb();
+  const row = database.prepare("SELECT picker_id FROM picks WHERE id = ? AND picked_id = ?")
+    .get(pickId, userId) as { picker_id: string } | undefined;
+  if (!row) return;
+  blockPair(database, userId, row.picker_id);
+}
+
+export function getBlockedUsers(userId: string) {
+  return getDb().prepare(`SELECT u.id, u.first_name, u.last_name, u.class_year
+    FROM blocks b JOIN users u ON u.id = b.blocked_id
+    WHERE b.blocker_id = ? ORDER BY u.first_name, u.last_name`).all(userId) as Record<string, unknown>[];
+}
+
+export function unblockUser(userId: string, targetId: string) {
+  getDb().prepare("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?").run(userId, targetId);
 }
 
 export function getNotifications(userId: string) {
@@ -762,6 +816,13 @@ export function getNotifications(userId: string) {
     createdAt: String(row.created_at),
     payload: JSON.parse(String(row.payload)) as Record<string, unknown>,
   }));
+}
+
+export function savePushSubscription(userId: string, subscription: { endpoint: string; p256dh: string; auth: string }) {
+  getDb().prepare(`INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`)
+    .run(randomUUID(), userId, subscription.endpoint, subscription.p256dh, subscription.auth, new Date().toISOString());
 }
 
 export function submitReport(userId: string, reason: string) {
@@ -780,36 +841,23 @@ export function getFounderDashboard() {
     (SELECT COUNT(*) FROM users WHERE is_demo = 0) AS users,
     (SELECT COUNT(*) FROM users WHERE is_demo = 0 AND onboarding_complete = 1) AS onboarded,
     (SELECT COUNT(*) FROM crushes) AS crushes,
-    (SELECT COUNT(*) FROM contact_jobs WHERE status = 'queued') AS queued`).get() as Record<string, number>;
-  const users = database
-    .prepare(`SELECT member_number, email, first_name, last_name, class_year, phone_e164,
-      phone_consent_at, onboarding_complete, created_at FROM users WHERE is_demo = 0 ORDER BY created_at DESC`)
-    .all() as Record<string, unknown>[];
-  const jobs = database
-    .prepare(`SELECT j.id, j.status, j.provider, j.recipient_phone, j.message, j.deep_link, j.created_at, j.contacted_at,
-      sender.member_number AS sender_number, sender.first_name AS sender_first_name, sender.email AS sender_email,
-      recipient.member_number AS recipient_number, recipient.first_name AS recipient_first_name,
-      recipient.last_name AS recipient_last_name, recipient.email AS recipient_email,
-      c.status AS crush_status
-      FROM contact_jobs j
-      JOIN crushes c ON c.id = j.crush_id
-      JOIN users sender ON sender.id = c.sender_id
-      JOIN users recipient ON recipient.id = c.recipient_id
-      ORDER BY CASE j.status WHEN 'queued' THEN 0 ELSE 1 END, j.created_at DESC`)
-    .all() as Record<string, unknown>[];
-  const reports = database.prepare(`SELECT r.id, r.reason, r.created_at, r.resolved_at,
-    u.member_number, u.first_name, u.last_name, u.email
-    FROM reports r JOIN users u ON u.id = r.reporter_id
-    ORDER BY r.resolved_at IS NOT NULL, r.created_at DESC`).all() as Record<string, unknown>[];
-  return { totals, users, jobs, reports };
-}
-
-export function setContactJobStatus(jobId: string, status: "queued" | "contacted" | "paused") {
-  const now = new Date().toISOString();
-  getDb()
-    .prepare("UPDATE contact_jobs SET status = ?, contacted_at = CASE WHEN ? = 'contacted' THEN ? ELSE contacted_at END, updated_at = ? WHERE id = ?")
-    .run(status, status, now, now, jobId);
-  auditAdmin("contact_job_status_changed", "contact_job", jobId, { status });
+    (SELECT COUNT(*) FROM crushes WHERE status = 'active') AS active_crushes,
+    (SELECT COUNT(*) FROM crushes WHERE status IN ('mutual','revealed')) AS resolved_crushes,
+    (SELECT COUNT(*) FROM guesses) AS guesses,
+    (SELECT COUNT(*) FROM reports WHERE resolved_at IS NULL) AS open_reports`).get() as Record<string, number>;
+  const retention = database.prepare(`SELECT
+    (SELECT COUNT(*) FROM users WHERE is_demo = 0 AND last_active_at >= datetime('now', '-7 days')) AS active_7d,
+    (SELECT COUNT(*) FROM users WHERE is_demo = 0 AND last_active_at >= datetime('now', '-30 days')) AS active_30d,
+    (SELECT COUNT(DISTINCT user_id) FROM events WHERE name = 'round_completed') AS round_finishers`).get() as Record<string, number>;
+  const funnel = database.prepare(`SELECT
+    (SELECT COUNT(*) FROM users WHERE is_demo = 0) AS signed_up,
+    (SELECT COUNT(*) FROM users WHERE is_demo = 0 AND onboarding_complete = 1) AS onboarded,
+    (SELECT COUNT(DISTINCT sender_id) FROM crushes) AS sent_a_crush,
+    (SELECT COUNT(DISTINCT recipient_id) FROM crushes c WHERE EXISTS (SELECT 1 FROM crush_opens o WHERE o.crush_id = c.id)) AS opened_a_crush,
+    (SELECT COUNT(DISTINCT c.recipient_id) FROM crushes c JOIN guesses g ON g.crush_id = c.id) AS made_a_guess`).get() as Record<string, number>;
+  const reports = database.prepare(`SELECT id, reason, created_at, resolved_at FROM reports
+    ORDER BY resolved_at IS NOT NULL, created_at DESC`).all() as Record<string, unknown>[];
+  return { totals, retention, funnel, reports };
 }
 
 export function resolveReport(reportId: string) {
