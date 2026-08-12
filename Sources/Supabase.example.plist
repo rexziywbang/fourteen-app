@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Copy to Sources/Supabase.plist and fill in. That file is gitignored.
+
+  Use the ANON key here, never the service-role key. The anon key is meant to
+  ship inside clients — row-level security is what protects the data, not the
+  secrecy of this string. The service-role key bypasses RLS entirely and must
+  never leave the server; if it ever appears in this file, rotate it.
+-->
+<plist version="1.0">
+<dict>
+	<key>SUPABASE_URL</key>
+	<string>https://YOUR-PROJECT-REF.supabase.co</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>PASTE_ANON_KEY_HERE</string>
+</dict>
+</plist>

@@ -1,0 +1,52 @@
+# ── Secrets ────────────────────────────────────────────────────────────────
+# Sources/Supabase.plist holds the project URL and anon key. The anon key is
+# not a password — RLS is what protects the data — but it is still a key that
+# ties a public repo to a live project, so it stays out.
+Sources/Supabase.plist
+Supabase.plist
+
+# APNs signing key. This one IS a credential: anyone holding it can send push
+# to your bundle id until you revoke it in the developer portal.
+*.p8
+AuthKey_*.p8
+
+# Service-role key, database URLs, function secrets.
+.env
+.env.*
+!.env.example
+
+# ── Xcode ──────────────────────────────────────────────────────────────────
+# Fourteen.xcodeproj IS committed — it is hand-written and uses a synchronized
+# root group, so adding a Swift file never touches it and it does not generate
+# the merge conflicts a normal pbxproj would. project.yml is kept alongside it
+# so you can switch to `xcodegen` later if you ever want to.
+# Per-user state inside the project is still ignored:
+*.xcworkspace/
+xcuserdata/
+*.xcuserdatad/
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ── Swift / SPM ────────────────────────────────────────────────────────────
+.build/
+.swiftpm/
+Packages/
+*.resolved
+
+# ── Supabase CLI ───────────────────────────────────────────────────────────
+supabase/.branches/
+supabase/.temp/
+supabase/config.toml
+
+# ── macOS ──────────────────────────────────────────────────────────────────
+.DS_Store
+._*
+.AppleDouble
+
+# ── Editors ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
